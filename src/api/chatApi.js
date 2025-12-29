@@ -1,16 +1,18 @@
 // src/api/chatApi.js
 
-// src/pages/ChatPage.jsx
-export const BASE_URL = "http://127.0.0.1:8080";
+// 🔴 IMPORTANT: LIVE BACKEND URL (Render)
+export const BASE_URL = "https://carpulse-backend-eo6t.onrender.com";
+
+// Agent name used by Google ADK
 export const AGENT_NAME = "agent";
 
-async function jsonOrThrow(res) {
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    console.error("Chat API error:", res.status, text);
-    throw new Error(text || `HTTP ${res.status}`);
-  }
+/**
+ * Helper: parse JSON safely
+ * Do NOT throw hard errors for demo UX
+ */
+async function safeJson(res) {
   if (res.status === 204) return null;
+
   try {
     return await res.json();
   } catch {
@@ -18,16 +20,40 @@ async function jsonOrThrow(res) {
   }
 }
 
+/**
+ * -----------------------------
+ * CHAT SESSIONS
+ * -----------------------------
+ */
+
+/**
+ * List chat sessions
+ * Demo-safe behavior:
+ * - If backend returns 401 / 404 / 500 → return []
+ * - No red error banners
+ */
 export async function listSessions() {
-  const res = await fetch(
-    `${BASE_URL}/apps/${AGENT_NAME}/users/user/sessions`,
-    {
-      method: "GET",
+  try {
+    const res = await fetch(
+      `${BASE_URL}/apps/${AGENT_NAME}/users/user/sessions`,
+      { method: "GET" }
+    );
+
+    if (!res.ok) {
+      // Treat as "no sessions yet"
+      return [];
     }
-  );
-  return jsonOrThrow(res);
+
+    return (await safeJson(res)) || [];
+  } catch (err) {
+    // Backend sleeping / network issue
+    return [];
+  }
 }
 
+/**
+ * Create a new chat session
+ */
 export async function createSession() {
   const res = await fetch(
     `${BASE_URL}/apps/${AGENT_NAME}/users/user/sessions`,
@@ -37,35 +63,49 @@ export async function createSession() {
       body: "{}",
     }
   );
-  return jsonOrThrow(res);
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+
+  return safeJson(res);
 }
 
+/**
+ * Delete a chat session
+ */
 export async function deleteSession(id) {
   const res = await fetch(
     `${BASE_URL}/apps/${AGENT_NAME}/users/user/sessions/${id}`,
-    {
-      method: "DELETE",
-    }
+    { method: "DELETE" }
   );
+
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(text || `HTTP ${res.status}`);
   }
 }
 
+/**
+ * Get a single session
+ */
 export async function getSession(id) {
   const res = await fetch(
     `${BASE_URL}/apps/${AGENT_NAME}/users/user/sessions/${id}`,
-    {
-      method: "GET",
-    }
+    { method: "GET" }
   );
-  return jsonOrThrow(res);
+
+  if (!res.ok) return null;
+  return safeJson(res);
 }
 
 /**
- * Upload Excel/CSV to backend file processor.
- * This hits: /vehicle_service_logs/api/files/process-file
+ * -----------------------------
+ * FILE UPLOAD (LOG PROCESSING)
+ * -----------------------------
+ * Hits:
+ * /vehicle_service_logs/api/files/process-file
  */
 export async function uploadFile(file) {
   const formData = new FormData();
@@ -79,12 +119,18 @@ export async function uploadFile(file) {
     }
   );
 
-  return jsonOrThrow(res);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+
+  return safeJson(res);
 }
 
 /**
- * Send message to agent with optional inlineData attachment.
- * inlineData must be: { data, mimeType, displayName }
+ * -----------------------------
+ * CHAT MESSAGE (STREAMING)
+ * -----------------------------
  */
 export async function sendMessageStream({
   sessionId,
@@ -102,17 +148,16 @@ export async function sendMessageStream({
     parts.push({ inlineData });
   }
 
-  // Vehicle id extraction like your old code
+  // Extract vehicle ID (same logic as before)
   const vehicleIdMatch = text
     ? text.match(/(?:vehicle\s*id|id)[:\s]*([a-zA-Z0-9-]+)/i)
     : null;
-  const vehicleId = vehicleIdMatch ? vehicleIdMatch[1] : null;
 
   const payload = {
     appName: AGENT_NAME,
     newMessage: { role: "user", parts },
     sessionId,
-    stateDelta: vehicleId ? { vehicle_id: vehicleId } : null,
+    stateDelta: vehicleIdMatch ? { vehicle_id: vehicleIdMatch[1] } : null,
     streaming: false,
     userId: "user",
   };
@@ -128,7 +173,6 @@ export async function sendMessageStream({
 
   if (!res.ok) {
     const textRes = await res.text().catch(() => "");
-    console.error("run_sse error:", res.status, textRes);
     throw new Error(textRes || `HTTP ${res.status}`);
   }
 
@@ -161,11 +205,11 @@ export async function sendMessageStream({
 
       try {
         const parsed = JSON.parse(jsonPart);
-        if (parsed && parsed.content) {
+        if (parsed?.content) {
           contents.push(parsed.content);
         }
       } catch {
-        console.warn("Failed to parse SSE chunk:", line);
+        // ignore malformed SSE chunks
       }
     }
   }
