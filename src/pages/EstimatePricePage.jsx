@@ -1,0 +1,168 @@
+import { useState } from "react";
+import { useAuth } from "../context/AuthContext.jsx";
+import { estimateServiceCost } from "../api/mlApi.js";
+
+export default function EstimatePricePage() {
+  const { token } = useAuth();
+
+  const [form, setForm] = useState({
+    vehicle_model: "",
+    service_type: "",
+    mileage: "",
+    mechanic_name: "",
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  function handleChange(e) {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    setResult(null);
+
+    if (!form.vehicle_model.trim() || !form.service_type.trim() || !form.mileage) {
+      setError("Vehicle model, service type, and mileage are required.");
+      return;
+    }
+
+    const mileageNum = Number(form.mileage);
+    if (Number.isNaN(mileageNum) || mileageNum <= 0) {
+      setError("Mileage must be a positive number.");
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      const payload = {
+        vehicle_model: form.vehicle_model.trim(),
+        service_type: form.service_type.trim(),
+        mileage: mileageNum,
+        mechanic_name: form.mechanic_name.trim() || null,
+      };
+
+      const res = await estimateServiceCost(token, payload);
+
+      if (!res.success) {
+        setError(res.message || "Failed to estimate cost.");
+        return;
+      }
+
+      setResult(res.data); // { predicted_cost, range_low, range_high }
+    } catch (err) {
+      console.error("Error estimating service cost:", err);
+      setError(err.message || "Something went wrong while estimating cost.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="estimate-page">
+      <div className="estimate-card">
+        <div className="estimate-header">
+          <h2>Estimate Service Cost</h2>
+          <p>
+            Use the ML model to get a realistic cost band before you even open a job card.
+          </p>
+        </div>
+
+        <form className="estimate-form" onSubmit={handleSubmit}>
+          <div className="form-row">
+            <div className="form-group">
+              <label htmlFor="vehicle_model">Vehicle Model *</label>
+              <input
+                id="vehicle_model"
+                name="vehicle_model"
+                placeholder="Hyundai Creta, Maruti Swift..."
+                value={form.vehicle_model}
+                onChange={handleChange}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="service_type">Service Type *</label>
+              <input
+                id="service_type"
+                name="service_type"
+                placeholder="General Service, Brake Service..."
+                value={form.service_type}
+                onChange={handleChange}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label htmlFor="mileage">Mileage (km) *</label>
+              <input
+                id="mileage"
+                name="mileage"
+                type="number"
+                min="1"
+                placeholder="45000"
+                value={form.mileage}
+                onChange={handleChange}
+                required
+              />
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="mechanic_name">Mechanic Name</label>
+              <input
+                id="mechanic_name"
+                name="mechanic_name"
+                placeholder="Optional – e.g., Ramesh"
+                value={form.mechanic_name}
+                onChange={handleChange}
+              />
+            </div>
+          </div>
+
+          {error && <p className="estimate-error">{error}</p>}
+
+          <button className="btn estimate-btn" type="submit" disabled={loading}>
+            {loading ? "Estimating..." : "Estimate Price"}
+          </button>
+        </form>
+
+        {result && (
+          <div className="estimate-result">
+            <div className="estimate-main">
+              <span className="estimate-label">Predicted cost</span>
+              <span className="estimate-value">₹{result.predicted_cost}</span>
+            </div>
+
+            <div className="estimate-range">
+              <div className="pill pill-low">
+                <span>Low</span>
+                <strong>₹{result.range_low}</strong>
+              </div>
+              <div className="pill pill-mid">
+                <span>Most likely</span>
+                <strong>₹{result.predicted_cost}</strong>
+              </div>
+              <div className="pill pill-high">
+                <span>High</span>
+                <strong>₹{result.range_high}</strong>
+              </div>
+            </div>
+
+            <p className="estimate-note">
+              This range is generated by the ML model based on past jobs with similar
+              vehicles and services. Use it as a guide, not as a hard quote.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
